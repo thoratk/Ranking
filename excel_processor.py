@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import copy
 from datetime import date
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
@@ -10,13 +11,10 @@ from openpyxl.styles import PatternFill
 
 from price_fetcher import PriceFetcher, get_fridays
 
+# Keep uploaded columns A, B, C as-is. Calculations start at D.
+KEEP_COLS = (1, 2, 3)
 SRC_SCRIPT = 1
-SRC_SECTOR = 3
-SRC_SEGMENT = 4
 
-OUT_SCRIPT = 1
-OUT_SECTOR = 2
-OUT_SEGMENT = 3
 OUT_BASE = 4
 OUT_CURRENT = 5
 OUT_POINTS = 6
@@ -73,6 +71,23 @@ def _detect_data_rows(ws, script_col: int, start_row: int = 2) -> Tuple[int, int
         raise ValueError("No stock symbols found in column A (Script).")
 
     return first_row, last_row
+
+
+def _copy_cell(source, target) -> None:
+    target.value = source.value
+    if source.has_style:
+        target.font = copy(source.font)
+        target.fill = copy(source.fill)
+        target.border = copy(source.border)
+        target.alignment = copy(source.alignment)
+        target.number_format = source.number_format
+
+
+def _copy_header_labels(src_ws, out_ws) -> None:
+    for col in KEEP_COLS:
+        label = src_ws.cell(1, col).value
+        if label is not None and str(label).strip():
+            out_ws.cell(1, col, label)
 
 
 def _rank_desc(values: List[Optional[float]]) -> List[Optional[int]]:
@@ -162,6 +177,8 @@ def process_workbook(
     if base_date > today:
         raise ValueError("Base date cannot be after today.")
 
+    src_wb = load_workbook(BytesIO(file_bytes), data_only=False)
+    src_ws = src_wb.active
     src_values = load_workbook(BytesIO(file_bytes), data_only=True).active
 
     headers = _read_headers(src_values)
@@ -169,16 +186,14 @@ def process_workbook(
     data_start_row, data_end_row = _detect_data_rows(src_values, script_col)
 
     symbols: List[str] = []
-    sectors: List[object] = []
-    segments: List[object] = []
+    source_rows: List[int] = []
 
     for row in range(data_start_row, data_end_row + 1):
         symbol = src_values.cell(row, script_col).value
         if symbol is None or str(symbol).strip() == "":
             continue
         symbols.append(str(symbol).strip())
-        sectors.append(src_values.cell(row, SRC_SECTOR).value)
-        segments.append(src_values.cell(row, SRC_SEGMENT).value)
+        source_rows.append(row)
 
     fridays = get_fridays(base_date, today)
     fetcher = PriceFetcher(symbols, base_date, today)
@@ -188,10 +203,9 @@ def process_workbook(
     ws = wb.active
     ws.title = "Ranking"
 
+    _copy_header_labels(src_ws, ws)
+
     base_label = f"Base Price ({base_date.strftime('%d-%b-%Y')})"
-    ws.cell(1, OUT_SCRIPT, "Script")
-    ws.cell(1, OUT_SECTOR, "Sector")
-    ws.cell(1, OUT_SEGMENT, "Segment")
     ws.cell(1, OUT_BASE, base_label)
     ws.cell(1, OUT_CURRENT, "Current Price")
     ws.cell(1, OUT_POINTS, "Points")
@@ -207,10 +221,10 @@ def process_workbook(
     base_prices: List[Optional[float]] = []
     pct_diffs: List[Optional[float]] = []
 
-    for out_row, (symbol, sector, segment) in enumerate(
-        zip(symbols, sectors, segments),
-        start=2,
-    ):
+    for out_row, (symbol, src_row) in enumerate(zip(symbols, source_rows), start=2):
+        for col in KEEP_COLS:
+            _copy_cell(src_ws.cell(src_row, col), ws.cell(out_row, col))
+
         base_price = fetcher.price_on(symbol, base_date)
         current_price = fetcher.price_on(symbol, today)
 
@@ -223,9 +237,6 @@ def process_workbook(
         pct_diff = _pct_change(base_price, current_price)
         pct_diffs.append(pct_diff)
 
-        ws.cell(out_row, OUT_SCRIPT, symbol)
-        ws.cell(out_row, OUT_SECTOR, sector)
-        ws.cell(out_row, OUT_SEGMENT, segment)
         ws.cell(out_row, OUT_BASE, base_price)
         ws.cell(out_row, OUT_CURRENT, current_price)
         ws.cell(out_row, OUT_POINTS, points)
