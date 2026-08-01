@@ -1,0 +1,11 @@
+# Only track Ranking app files (repo is in home folder)
+*
+!.gitignore
+!README.md
+!app.py
+!excel_processor.py
+!price_fetcher.py
+!requirements.txt
+!runtime.txt
+!Procfile
+!render.yaml

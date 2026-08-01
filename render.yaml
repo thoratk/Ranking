@@ -2,7 +2,6 @@ services:
   - type: web
     name: ranking-tracker
     runtime: python
-    rootDir: fo-ranking-tracker
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     plan: free
