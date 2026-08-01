@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill
 
-from price_fetcher import PriceFetcher, get_fridays
+from price_fetcher import PriceFetcher, get_fridays, trading_date_for
 
 # Keep uploaded columns A, B, C as-is. Calculations start at D.
 KEEP_COLS = (1, 2, 3)
@@ -121,10 +121,26 @@ def _top_n_symbols(
     return [symbol for symbol, _ in ranked[:n]]
 
 
-def _pct_change(base: Optional[float], current: Optional[float]) -> Optional[float]:
-    if base is None or current is None or base == 0:
+def _friday_header_label(friday: date) -> str:
+    trading = trading_date_for(friday)
+    if trading != friday:
+        return f"{friday.strftime('%d-%b-%Y')} ({trading.strftime('%d-%b-%Y')})"
+    return friday.strftime("%d-%b-%Y")
+
+
+def _friday_summary_label(friday: date) -> str:
+    trading = trading_date_for(friday)
+    if trading != friday:
+        return f"{friday.strftime('%d-%m-%Y')} ({trading.strftime('%d-%m-%Y')})"
+    return friday.strftime("%d-%m-%Y")
+
+
+def _pct_diff(base: Optional[float], price: Optional[float]) -> Optional[float]:
+    """% Diff = (points / base price) * 100, where points = price - base."""
+    if base is None or price is None or base == 0:
         return None
-    return ((current - base) / base) * 100.0
+    points = round(price - base, 2)
+    return (points / base) * 100.0
 
 
 def _fill_for_rank(rank: Optional[object]) -> Optional[PatternFill]:
@@ -161,12 +177,12 @@ def _build_friday_summary_sheet(
     friday_tops: List[List[str]] = []
 
     for col_idx, friday in enumerate(fridays, start=1):
-        summary.cell(1, col_idx, friday.strftime("%d-%m-%Y"))
+        summary.cell(1, col_idx, _friday_summary_label(friday))
 
         friday_pcts: List[Optional[float]] = []
         for base_price, symbol in zip(base_prices, symbols):
             friday_price = fetcher.price_on(symbol, friday)
-            friday_pcts.append(_pct_change(base_price, friday_price))
+            friday_pcts.append(_pct_diff(base_price, friday_price))
 
         top_symbols = _top_n_symbols(symbols, friday_pcts, TOP_N_FRIDAY_RANK)
         friday_tops.append(top_symbols)
@@ -275,7 +291,7 @@ def process_workbook(
     friday_col_map: Dict[date, int] = {}
     for idx, friday in enumerate(fridays):
         col = OUT_FRIDAY_START + idx
-        ws.cell(1, col, friday.strftime("%d-%b-%Y"))
+        ws.cell(1, col, _friday_header_label(friday))
         friday_col_map[friday] = col
 
     base_prices: List[Optional[float]] = []
@@ -292,15 +308,19 @@ def process_workbook(
 
         points = None
         if base_price is not None and current_price is not None:
-            points = current_price - base_price
+            points = round(current_price - base_price, 2)
 
-        pct_diff = _pct_change(base_price, current_price)
+        pct_diff = _pct_diff(base_price, current_price)
         pct_diffs.append(pct_diff)
 
-        ws.cell(out_row, OUT_BASE, base_price)
-        ws.cell(out_row, OUT_CURRENT, current_price)
-        ws.cell(out_row, OUT_POINTS, points)
-        ws.cell(out_row, OUT_PCT, pct_diff)
+        base_cell = ws.cell(out_row, OUT_BASE, base_price)
+        base_cell.number_format = "0.00"
+        current_cell = ws.cell(out_row, OUT_CURRENT, current_price)
+        current_cell.number_format = "0.00"
+        points_cell = ws.cell(out_row, OUT_POINTS, points)
+        points_cell.number_format = "0.00"
+        pct_cell = ws.cell(out_row, OUT_PCT, pct_diff)
+        pct_cell.number_format = "0.00"
 
     today_ranks = _rank_desc(pct_diffs)
     for out_row, rank in enumerate(today_ranks, start=2):
@@ -311,7 +331,7 @@ def process_workbook(
         friday_pcts: List[Optional[float]] = []
         for base_price, symbol in zip(base_prices, symbols):
             friday_price = fetcher.price_on(symbol, friday)
-            friday_pcts.append(_pct_change(base_price, friday_price))
+            friday_pcts.append(_pct_diff(base_price, friday_price))
 
         friday_ranks = _rank_desc(friday_pcts)
         col = friday_col_map[friday]

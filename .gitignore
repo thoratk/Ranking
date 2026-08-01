@@ -5,6 +5,7 @@
 !app.py
 !excel_processor.py
 !price_fetcher.py
+!nse_calendar.py
 !requirements.txt
 !runtime.txt
 !Procfile
