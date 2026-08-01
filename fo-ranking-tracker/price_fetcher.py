@@ -70,6 +70,16 @@ def _market_session_open_ist() -> bool:
     return session_open <= now < session_close
 
 
+def _today_bar_is_final() -> bool:
+    """True only after NSE cash session has finished for today (15:30 IST)."""
+    now = datetime.now(IST)
+    today = now.date()
+    if not is_trading_day(today):
+        return False
+    session_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return now >= session_close
+
+
 def _last_completed_trading_day() -> date:
     today = _today_ist()
     if is_trading_day(today) and not _market_session_open_ist():
@@ -153,6 +163,7 @@ def _fetch_history(symbol: str, start: date, end: date) -> List[Tuple[date, floa
     closes = quote_block.get("close") or []
 
     history: List[Tuple[date, float]] = []
+    today = _today_ist()
     for index, ts in enumerate(timestamps):
         if index >= len(closes) or closes[index] is None:
             continue
@@ -161,6 +172,10 @@ def _fetch_history(symbol: str, start: date, end: date) -> List[Tuple[date, floa
 
         # Yahoo sometimes forward-fills holidays (e.g. 26-Jun-2026 Muharram).
         if not is_trading_day(day):
+            continue
+
+        # Never use today's bar until the NSE session close is published.
+        if day == today and not _today_bar_is_final():
             continue
 
         close_price = _round_price(float(closes[index]))

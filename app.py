@@ -6,14 +6,14 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from excel_processor import process_workbook
 from price_fetcher import today_ist
 
-APP_VERSION = "v2.3-ist-today"
+APP_VERSION = "v2.4-close-values"
 
 app = FastAPI(title="F&O Friday Ranking Tracker")
 
 
-@app.get("/version")
-async def version() -> dict[str, str]:
-    return {"version": APP_VERSION}
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok", "version": APP_VERSION, "today_ist": today_ist().isoformat()}
 
 
 @app.get("/", response_class=HTMLResponse)

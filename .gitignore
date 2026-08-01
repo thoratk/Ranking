@@ -10,6 +10,7 @@
 !runtime.txt
 !Procfile
 !render.yaml
+!DEPLOY_VERSION.txt
 !fo-ranking-tracker/
 fo-ranking-tracker/*
 !fo-ranking-tracker/**

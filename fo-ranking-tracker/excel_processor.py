@@ -78,14 +78,39 @@ def _detect_data_rows(ws, script_col: int, start_row: int = 2) -> Tuple[int, int
     return first_row, last_row
 
 
-def _copy_cell(source, target) -> None:
-    target.value = source.value
-    if source.has_style:
-        target.font = copy(source.font)
-        target.fill = copy(source.fill)
-        target.border = copy(source.border)
-        target.alignment = copy(source.alignment)
-        target.number_format = source.number_format
+def _copy_cell_value(src_value_cell, src_style_cell, target) -> None:
+    """Copy plain values only — never Excel formulas."""
+    target.value = src_value_cell.value
+    if src_style_cell.has_style:
+        target.font = copy(src_style_cell.font)
+        target.fill = copy(src_style_cell.fill)
+        target.border = copy(src_style_cell.border)
+        target.alignment = copy(src_style_cell.alignment)
+        target.number_format = src_style_cell.number_format
+
+
+def _write_price_cell(cell, value: Optional[float]) -> None:
+    if value is None:
+        cell.value = None
+    else:
+        cell.value = round(value, 2)
+    cell.number_format = "0.00"
+
+
+def _write_points_cell(cell, value: Optional[float]) -> None:
+    if value is None:
+        cell.value = None
+    else:
+        cell.value = round(value, 2)
+    cell.number_format = "0.00"
+
+
+def _write_pct_cell(cell, value: Optional[float]) -> None:
+    if value is None:
+        cell.value = None
+    else:
+        cell.value = round(value, 2)
+    cell.number_format = "0.00"
 
 
 def _copy_header_labels(src_ws, out_ws) -> None:
@@ -300,11 +325,12 @@ def process_workbook(
     pct_diffs: List[Optional[float]] = []
 
     for out_row, (symbol, src_row) in enumerate(zip(symbols, source_rows), start=2):
-        for col in KEEP_COLS:
-            _copy_cell(src_ws.cell(src_row, col), ws.cell(out_row, col))
-
         base_price = fetcher.price_on(symbol, base_date)
         current_price = fetcher.price_on(symbol, today)
+        if base_price is not None:
+            base_price = round(base_price, 2)
+        if current_price is not None:
+            current_price = round(current_price, 2)
 
         base_prices.append(base_price)
 
@@ -315,14 +341,17 @@ def process_workbook(
         pct_diff = _pct_diff(base_price, current_price)
         pct_diffs.append(pct_diff)
 
-        base_cell = ws.cell(out_row, OUT_BASE, base_price)
-        base_cell.number_format = "0.00"
-        current_cell = ws.cell(out_row, OUT_CURRENT, current_price)
-        current_cell.number_format = "0.00"
-        points_cell = ws.cell(out_row, OUT_POINTS, points)
-        points_cell.number_format = "0.00"
-        pct_cell = ws.cell(out_row, OUT_PCT, pct_diff)
-        pct_cell.number_format = "0.00"
+        for col in KEEP_COLS:
+            _copy_cell_value(
+                src_values.cell(src_row, col),
+                src_ws.cell(src_row, col),
+                ws.cell(out_row, col),
+            )
+
+        _write_price_cell(ws.cell(out_row, OUT_BASE), base_price)
+        _write_price_cell(ws.cell(out_row, OUT_CURRENT), current_price)
+        _write_points_cell(ws.cell(out_row, OUT_POINTS), points)
+        _write_pct_cell(ws.cell(out_row, OUT_PCT), pct_diff)
 
     today_ranks = _rank_desc(pct_diffs)
     for out_row, rank in enumerate(today_ranks, start=2):
