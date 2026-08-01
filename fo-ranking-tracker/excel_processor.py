@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import copy
 from datetime import date
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
@@ -8,35 +9,34 @@ from typing import Dict, List, Optional, Tuple
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill
 
-from price_fetcher import PriceFetcher, get_fridays
+from price_fetcher import PriceFetcher, get_fridays, trading_date_for
 
-# Source columns in uploaded file
-SRC_SCRIPT = 1   # A
-SRC_SECTOR = 3   # C
-SRC_SEGMENT = 4  # D
+# Keep uploaded columns A, B, C as-is. Calculations start at D.
+KEEP_COLS = (1, 2, 3)
+SRC_SCRIPT = 1
 
-# Output columns in clean workbook
-OUT_SCRIPT = 1
-OUT_SECTOR = 2
-OUT_SEGMENT = 3
 OUT_BASE = 4
 OUT_CURRENT = 5
 OUT_POINTS = 6
 OUT_PCT = 7
 OUT_RANK = 8
-OUT_FRIDAY_START = 9  # I
+OUT_FRIDAY_START = 9
 
 TOP_N_FRIDAY_RANK = 20
 FRIDAY_SUMMARY_SHEET = "Friday Top 20"
+TOP_GRID_START_ROW = 2
+TOP_GRID_END_ROW = 21
+
+FILL_ENTRY = PatternFill(fill_type="solid", fgColor="C6EFCE")
+FILL_EXIT = PatternFill(fill_type="solid", fgColor="FFC7CE")
 
 SCRIPT_HEADERS = ("script", "symbol", "ticker")
 
-# Rank-based colors (matches your Excel: 1-20 blue, 21-40 green, 41-60 yellow, 61-90 brown)
 RANK_COLOR_BANDS: Tuple[Tuple[int, int, str], ...] = (
-    (1, 20, "BDD7EE"),   # light blue
-    (21, 40, "C6EFCE"),  # light green
-    (41, 60, "FFEB9C"),  # yellow
-    (61, 90, "F4B084"),  # light brown
+    (1, 20, "BDD7EE"),
+    (21, 40, "C6EFCE"),
+    (41, 60, "FFEB9C"),
+    (61, 90, "F4B084"),
 )
 
 
@@ -78,6 +78,23 @@ def _detect_data_rows(ws, script_col: int, start_row: int = 2) -> Tuple[int, int
     return first_row, last_row
 
 
+def _copy_cell(source, target) -> None:
+    target.value = source.value
+    if source.has_style:
+        target.font = copy(source.font)
+        target.fill = copy(source.fill)
+        target.border = copy(source.border)
+        target.alignment = copy(source.alignment)
+        target.number_format = source.number_format
+
+
+def _copy_header_labels(src_ws, out_ws) -> None:
+    for col in KEEP_COLS:
+        label = src_ws.cell(1, col).value
+        if label is not None and str(label).strip():
+            out_ws.cell(1, col, label)
+
+
 def _rank_desc(values: List[Optional[float]]) -> List[Optional[int]]:
     indexed = [(idx, val) for idx, val in enumerate(values) if val is not None]
     indexed.sort(key=lambda item: item[1], reverse=True)
@@ -104,10 +121,26 @@ def _top_n_symbols(
     return [symbol for symbol, _ in ranked[:n]]
 
 
-def _pct_change(base: Optional[float], current: Optional[float]) -> Optional[float]:
-    if base is None or current is None or base == 0:
+def _friday_header_label(friday: date) -> str:
+    trading = trading_date_for(friday)
+    if trading != friday:
+        return f"{friday.strftime('%d-%b-%Y')} ({trading.strftime('%d-%b-%Y')})"
+    return friday.strftime("%d-%b-%Y")
+
+
+def _friday_summary_label(friday: date) -> str:
+    trading = trading_date_for(friday)
+    if trading != friday:
+        return f"{friday.strftime('%d-%m-%Y')} ({trading.strftime('%d-%m-%Y')})"
+    return friday.strftime("%d-%m-%Y")
+
+
+def _pct_diff(base: Optional[float], price: Optional[float]) -> Optional[float]:
+    """% Diff = (points / base price) * 100, where points = price - base."""
+    if base is None or price is None or base == 0:
         return None
-    return ((current - base) / base) * 100.0
+    points = round(price - base, 2)
+    return (points / base) * 100.0
 
 
 def _fill_for_rank(rank: Optional[object]) -> Optional[PatternFill]:
@@ -141,19 +174,74 @@ def _build_friday_summary_sheet(
         del wb[FRIDAY_SUMMARY_SHEET]
 
     summary = wb.create_sheet(FRIDAY_SUMMARY_SHEET)
+    friday_tops: List[List[str]] = []
 
     for col_idx, friday in enumerate(fridays, start=1):
-        summary.cell(1, col_idx, friday.strftime("%d-%m-%Y"))
+        summary.cell(1, col_idx, _friday_summary_label(friday))
 
         friday_pcts: List[Optional[float]] = []
         for base_price, symbol in zip(base_prices, symbols):
             friday_price = fetcher.price_on(symbol, friday)
-            friday_pcts.append(_pct_change(base_price, friday_price))
+            friday_pcts.append(_pct_diff(base_price, friday_price))
 
         top_symbols = _top_n_symbols(symbols, friday_pcts, TOP_N_FRIDAY_RANK)
-        for row_offset, symbol in enumerate(top_symbols, start=2):
-            cell = summary.cell(row_offset, col_idx, symbol)
-            _apply_rank_fill(cell, row_offset - 1)
+        friday_tops.append(top_symbols)
+
+        for row_offset, symbol in enumerate(top_symbols, start=TOP_GRID_START_ROW):
+            summary.cell(row_offset, col_idx, symbol)
+
+    exits_per_col: List[List[str]] = []
+    entries_per_col: List[List[str]] = []
+    max_exits = 0
+    max_entries = 0
+
+    for col_idx, top_symbols in enumerate(friday_tops):
+        prev_set = set(friday_tops[col_idx - 1]) if col_idx > 0 else set()
+        curr_set = set(top_symbols)
+
+        entries = [symbol for symbol in top_symbols if symbol not in prev_set]
+        exits = sorted(prev_set - curr_set)
+
+        entries_per_col.append(entries)
+        exits_per_col.append(exits)
+        max_exits = max(max_exits, len(exits))
+        max_entries = max(max_entries, len(entries))
+
+        for row_offset, symbol in enumerate(top_symbols, start=TOP_GRID_START_ROW):
+            cell = summary.cell(row_offset, col_idx + 1)
+            if col_idx == 0 or symbol in entries:
+                cell.fill = FILL_ENTRY
+
+    # If column B (or any week) has exits, mark those stocks red in the
+    # previous column's top-20 grid (e.g. exits in B -> red in column A).
+    for col_idx, exits in enumerate(exits_per_col):
+        if col_idx == 0 or not exits:
+            continue
+        prev_col = col_idx
+        prev_top = friday_tops[col_idx - 1]
+        exit_set = set(exits)
+        for row_offset, symbol in enumerate(prev_top, start=TOP_GRID_START_ROW):
+            if symbol in exit_set:
+                summary.cell(row_offset, prev_col).fill = FILL_EXIT
+
+    exit_header_row = TOP_GRID_END_ROW + 2
+    exit_start_row = exit_header_row + 1
+    exit_block_rows = max(max_exits, 1)
+
+    for col_idx, exits in enumerate(exits_per_col, start=1):
+        summary.cell(exit_header_row, col_idx, "Exit")
+        for offset, symbol in enumerate(exits):
+            summary.cell(exit_start_row + offset, col_idx, symbol)
+
+    entry_header_row = exit_start_row + exit_block_rows + 1
+    entry_start_row = entry_header_row + 1
+    entry_block_rows = max(max_entries, 1)
+
+    for col_idx, entries in enumerate(entries_per_col, start=1):
+        summary.cell(entry_header_row, col_idx, "Entry")
+        for offset, symbol in enumerate(entries):
+            cell = summary.cell(entry_start_row + offset, col_idx, symbol)
+            cell.fill = FILL_ENTRY
 
 
 def process_workbook(
@@ -165,6 +253,8 @@ def process_workbook(
     if base_date > today:
         raise ValueError("Base date cannot be after today.")
 
+    src_wb = load_workbook(BytesIO(file_bytes), data_only=False)
+    src_ws = src_wb.active
     src_values = load_workbook(BytesIO(file_bytes), data_only=True).active
 
     headers = _read_headers(src_values)
@@ -172,16 +262,14 @@ def process_workbook(
     data_start_row, data_end_row = _detect_data_rows(src_values, script_col)
 
     symbols: List[str] = []
-    sectors: List[object] = []
-    segments: List[object] = []
+    source_rows: List[int] = []
 
     for row in range(data_start_row, data_end_row + 1):
         symbol = src_values.cell(row, script_col).value
         if symbol is None or str(symbol).strip() == "":
             continue
         symbols.append(str(symbol).strip())
-        sectors.append(src_values.cell(row, SRC_SECTOR).value)
-        segments.append(src_values.cell(row, SRC_SEGMENT).value)
+        source_rows.append(row)
 
     fridays = get_fridays(base_date, today)
     fetcher = PriceFetcher(symbols, base_date, today)
@@ -191,10 +279,9 @@ def process_workbook(
     ws = wb.active
     ws.title = "Ranking"
 
+    _copy_header_labels(src_ws, ws)
+
     base_label = f"Base Price ({base_date.strftime('%d-%b-%Y')})"
-    ws.cell(1, OUT_SCRIPT, "Script")
-    ws.cell(1, OUT_SECTOR, "Sector")
-    ws.cell(1, OUT_SEGMENT, "Segment")
     ws.cell(1, OUT_BASE, base_label)
     ws.cell(1, OUT_CURRENT, "Current Price")
     ws.cell(1, OUT_POINTS, "Points")
@@ -204,16 +291,16 @@ def process_workbook(
     friday_col_map: Dict[date, int] = {}
     for idx, friday in enumerate(fridays):
         col = OUT_FRIDAY_START + idx
-        ws.cell(1, col, friday.strftime("%d-%b-%Y"))
+        ws.cell(1, col, _friday_header_label(friday))
         friday_col_map[friday] = col
 
     base_prices: List[Optional[float]] = []
     pct_diffs: List[Optional[float]] = []
 
-    for out_row, (symbol, sector, segment) in enumerate(
-        zip(symbols, sectors, segments),
-        start=2,
-    ):
+    for out_row, (symbol, src_row) in enumerate(zip(symbols, source_rows), start=2):
+        for col in KEEP_COLS:
+            _copy_cell(src_ws.cell(src_row, col), ws.cell(out_row, col))
+
         base_price = fetcher.price_on(symbol, base_date)
         current_price = fetcher.price_on(symbol, today)
 
@@ -221,18 +308,19 @@ def process_workbook(
 
         points = None
         if base_price is not None and current_price is not None:
-            points = current_price - base_price
+            points = round(current_price - base_price, 2)
 
-        pct_diff = _pct_change(base_price, current_price)
+        pct_diff = _pct_diff(base_price, current_price)
         pct_diffs.append(pct_diff)
 
-        ws.cell(out_row, OUT_SCRIPT, symbol)
-        ws.cell(out_row, OUT_SECTOR, sector)
-        ws.cell(out_row, OUT_SEGMENT, segment)
-        ws.cell(out_row, OUT_BASE, base_price)
-        ws.cell(out_row, OUT_CURRENT, current_price)
-        ws.cell(out_row, OUT_POINTS, points)
-        ws.cell(out_row, OUT_PCT, pct_diff)
+        base_cell = ws.cell(out_row, OUT_BASE, base_price)
+        base_cell.number_format = "0.00"
+        current_cell = ws.cell(out_row, OUT_CURRENT, current_price)
+        current_cell.number_format = "0.00"
+        points_cell = ws.cell(out_row, OUT_POINTS, points)
+        points_cell.number_format = "0.00"
+        pct_cell = ws.cell(out_row, OUT_PCT, pct_diff)
+        pct_cell.number_format = "0.00"
 
     today_ranks = _rank_desc(pct_diffs)
     for out_row, rank in enumerate(today_ranks, start=2):
@@ -243,7 +331,7 @@ def process_workbook(
         friday_pcts: List[Optional[float]] = []
         for base_price, symbol in zip(base_prices, symbols):
             friday_price = fetcher.price_on(symbol, friday)
-            friday_pcts.append(_pct_change(base_price, friday_price))
+            friday_pcts.append(_pct_diff(base_price, friday_price))
 
         friday_ranks = _rank_desc(friday_pcts)
         col = friday_col_map[friday]

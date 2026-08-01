@@ -5,7 +5,14 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from excel_processor import process_workbook
 
+APP_VERSION = "v2.1-holiday-close"
+
 app = FastAPI(title="F&O Friday Ranking Tracker")
+
+
+@app.get("/version")
+async def version() -> dict[str, str]:
+    return {"version": APP_VERSION}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -149,6 +156,7 @@ async def index() -> str:
       <p style="margin:12px 0 0;color:var(--muted);font-size:0.9rem;">
         Friday Top 20: new entries = light green in top grid. Exits listed below; those stocks turn light red in the previous Friday column.
       </p>
+      <p style="margin:12px 0 0;color:var(--muted);font-size:0.85rem;">Build: """ + APP_VERSION + """</p>
     </div>
   </div>
 

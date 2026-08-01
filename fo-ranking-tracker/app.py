@@ -5,7 +5,14 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from excel_processor import process_workbook
 
+APP_VERSION = "v2.1-holiday-close"
+
 app = FastAPI(title="F&O Friday Ranking Tracker")
+
+
+@app.get("/version")
+async def version() -> dict[str, str]:
+    return {"version": APP_VERSION}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -114,8 +121,9 @@ async def index() -> str:
   <div class="wrap">
     <h1>F&O Friday Ranking Tracker</h1>
     <p class="sub">
-      Upload your F&O Excel file, choose a base date, and download an updated sheet with
-      base/current prices, today's rank, and weekly Friday ranks.
+      Upload your F&O Excel file and pick a base date.
+      Columns <strong>A, B, C</strong> are copied exactly from your file.
+      Calculations start from column <strong>D</strong>.
     </p>
 
     <div class="card">
@@ -125,7 +133,7 @@ async def index() -> str:
           <input id="file" name="file" type="file" accept=".xlsx" required />
         </div>
         <div class="field">
-          <label for="base_date">Base date (column G price)</label>
+          <label for="base_date">Base date (column D price)</label>
           <input id="base_date" name="base_date" type="date" required />
         </div>
         <button id="submit-btn" type="submit">Generate ranked Excel</button>
@@ -134,23 +142,21 @@ async def index() -> str:
     </div>
 
     <div class="note">
-      <strong>Output layout (after cleanup)</strong>
+      <strong>Output layout</strong>
       <ul>
-        <li><strong>A</strong> Script</li>
-        <li><strong>B</strong> Sector</li>
-        <li><strong>C</strong> Segment</li>
+        <li><strong>A–C</strong> Same as your uploaded file (Script, Script-EQ, Sector, etc.)</li>
         <li><strong>D</strong> Base price (your selected date)</li>
         <li><strong>E</strong> Current price</li>
         <li><strong>F</strong> Points (E − D)</li>
         <li><strong>G</strong> % diff from base to current</li>
         <li><strong>H</strong> Today's rank</li>
-        <li><strong>I onward</strong> Friday ranks (numbers on main sheet)</li>
-        <li><strong>Friday Top 20</strong> sheet — top 20 stock names per Friday (like your image)</li>
+        <li><strong>I onward</strong> Friday ranks (color-coded)</li>
+        <li><strong>Friday Top 20</strong> sheet — top 20 per Friday, Entry (green) / Exit (red) sections below</li>
       </ul>
       <p style="margin:12px 0 0;color:var(--muted);font-size:0.9rem;">
-        Rank columns (H and I onward) are color-coded:
-        1–20 blue, 21–40 green, 41–60 yellow, 61–90 brown, 91+ no color.
+        Friday Top 20: new entries = light green in top grid. Exits listed below; those stocks turn light red in the previous Friday column.
       </p>
+      <p style="margin:12px 0 0;color:var(--muted);font-size:0.85rem;">Build: """ + APP_VERSION + """</p>
     </div>
   </div>
 
