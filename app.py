@@ -5,7 +5,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from excel_processor import process_workbook
 
-APP_VERSION = "v2.1-holiday-close"
+APP_VERSION = "v2.2-deploy-now"
 
 app = FastAPI(title="F&O Friday Ranking Tracker")
 
@@ -119,6 +119,9 @@ async def index() -> str:
 </head>
 <body>
   <div class="wrap">
+    <div style="background:#22c55e;color:#0f172a;padding:10px 14px;border-radius:10px;margin-bottom:18px;font-weight:700;text-align:center;">
+      Live build: """ + APP_VERSION + """
+    </div>
     <h1>F&O Friday Ranking Tracker</h1>
     <p class="sub">
       Upload your F&O Excel file and pick a base date.
