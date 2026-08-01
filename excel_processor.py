@@ -24,6 +24,11 @@ OUT_FRIDAY_START = 9
 
 TOP_N_FRIDAY_RANK = 20
 FRIDAY_SUMMARY_SHEET = "Friday Top 20"
+TOP_GRID_START_ROW = 2
+TOP_GRID_END_ROW = 21
+
+FILL_ENTRY = PatternFill(fill_type="solid", fgColor="C6EFCE")
+FILL_EXIT = PatternFill(fill_type="solid", fgColor="FFC7CE")
 
 SCRIPT_HEADERS = ("script", "symbol", "ticker")
 
@@ -153,6 +158,7 @@ def _build_friday_summary_sheet(
         del wb[FRIDAY_SUMMARY_SHEET]
 
     summary = wb.create_sheet(FRIDAY_SUMMARY_SHEET)
+    friday_tops: List[List[str]] = []
 
     for col_idx, friday in enumerate(fridays, start=1):
         summary.cell(1, col_idx, friday.strftime("%d-%m-%Y"))
@@ -163,9 +169,63 @@ def _build_friday_summary_sheet(
             friday_pcts.append(_pct_change(base_price, friday_price))
 
         top_symbols = _top_n_symbols(symbols, friday_pcts, TOP_N_FRIDAY_RANK)
-        for row_offset, symbol in enumerate(top_symbols, start=2):
-            cell = summary.cell(row_offset, col_idx, symbol)
-            _apply_rank_fill(cell, row_offset - 1)
+        friday_tops.append(top_symbols)
+
+        for row_offset, symbol in enumerate(top_symbols, start=TOP_GRID_START_ROW):
+            summary.cell(row_offset, col_idx, symbol)
+
+    exits_per_col: List[List[str]] = []
+    entries_per_col: List[List[str]] = []
+    max_exits = 0
+    max_entries = 0
+
+    for col_idx, top_symbols in enumerate(friday_tops):
+        prev_set = set(friday_tops[col_idx - 1]) if col_idx > 0 else set()
+        curr_set = set(top_symbols)
+
+        entries = [symbol for symbol in top_symbols if symbol not in prev_set]
+        exits = sorted(prev_set - curr_set)
+
+        entries_per_col.append(entries)
+        exits_per_col.append(exits)
+        max_exits = max(max_exits, len(exits))
+        max_entries = max(max_entries, len(entries))
+
+        for row_offset, symbol in enumerate(top_symbols, start=TOP_GRID_START_ROW):
+            cell = summary.cell(row_offset, col_idx + 1)
+            if col_idx == 0 or symbol in entries:
+                cell.fill = FILL_ENTRY
+
+    # If column B (or any week) has exits, mark those stocks red in the
+    # previous column's top-20 grid (e.g. exits in B -> red in column A).
+    for col_idx, exits in enumerate(exits_per_col):
+        if col_idx == 0 or not exits:
+            continue
+        prev_col = col_idx
+        prev_top = friday_tops[col_idx - 1]
+        exit_set = set(exits)
+        for row_offset, symbol in enumerate(prev_top, start=TOP_GRID_START_ROW):
+            if symbol in exit_set:
+                summary.cell(row_offset, prev_col).fill = FILL_EXIT
+
+    exit_header_row = TOP_GRID_END_ROW + 2
+    exit_start_row = exit_header_row + 1
+    exit_block_rows = max(max_exits, 1)
+
+    for col_idx, exits in enumerate(exits_per_col, start=1):
+        summary.cell(exit_header_row, col_idx, "Exit")
+        for offset, symbol in enumerate(exits):
+            summary.cell(exit_start_row + offset, col_idx, symbol)
+
+    entry_header_row = exit_start_row + exit_block_rows + 1
+    entry_start_row = entry_header_row + 1
+    entry_block_rows = max(max_entries, 1)
+
+    for col_idx, entries in enumerate(entries_per_col, start=1):
+        summary.cell(entry_header_row, col_idx, "Entry")
+        for offset, symbol in enumerate(entries):
+            cell = summary.cell(entry_start_row + offset, col_idx, symbol)
+            cell.fill = FILL_ENTRY
 
 
 def process_workbook(

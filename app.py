@@ -144,11 +144,10 @@ async def index() -> str:
         <li><strong>G</strong> % diff from base to current</li>
         <li><strong>H</strong> Today's rank</li>
         <li><strong>I onward</strong> Friday ranks (color-coded)</li>
-        <li><strong>Friday Top 20</strong> sheet — top 20 stock names per Friday</li>
+        <li><strong>Friday Top 20</strong> sheet — top 20 per Friday, Entry (green) / Exit (red) sections below</li>
       </ul>
       <p style="margin:12px 0 0;color:var(--muted);font-size:0.9rem;">
-        Rank columns (H and I onward) are color-coded:
-        1–20 blue, 21–40 green, 41–60 yellow, 61–90 brown, 91+ no color.
+        Friday Top 20: new entries = light green in top grid. Exits listed below; those stocks turn light red in the previous Friday column.
       </p>
     </div>
   </div>
