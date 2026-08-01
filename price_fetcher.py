@@ -56,6 +56,11 @@ def _today_ist() -> date:
     return datetime.now(IST).date()
 
 
+def today_ist() -> date:
+    """Current calendar date in India (NSE timezone)."""
+    return _today_ist()
+
+
 def _market_session_open_ist() -> bool:
     now = datetime.now(IST)
     if now.weekday() >= 5:

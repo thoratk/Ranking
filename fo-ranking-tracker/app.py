@@ -4,8 +4,9 @@ from io import BytesIO
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from excel_processor import process_workbook
+from price_fetcher import today_ist
 
-APP_VERSION = "v2.2-deploy-now"
+APP_VERSION = "v2.3-ist-today"
 
 app = FastAPI(title="F&O Friday Ranking Tracker")
 
@@ -237,7 +238,11 @@ async def process(
     return StreamingResponse(
         BytesIO(output),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="fo-ranked.xlsx"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="fo-ranked.xlsx"',
+            "X-App-Version": APP_VERSION,
+            "X-Today-IST": today_ist().isoformat(),
+        },
     )
 
 

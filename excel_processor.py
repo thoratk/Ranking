@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill
 
-from price_fetcher import PriceFetcher, get_fridays, trading_date_for
+from price_fetcher import PriceFetcher, get_fridays, today_ist, trading_date_for
 
 # Keep uploaded columns A, B, C as-is. Calculations start at D.
 KEEP_COLS = (1, 2, 3)
@@ -140,7 +140,7 @@ def _pct_diff(base: Optional[float], price: Optional[float]) -> Optional[float]:
     if base is None or price is None or base == 0:
         return None
     points = round(price - base, 2)
-    return (points / base) * 100.0
+    return round((points / base) * 100.0, 2)
 
 
 def _fill_for_rank(rank: Optional[object]) -> Optional[PatternFill]:
@@ -249,9 +249,11 @@ def process_workbook(
     base_date: date,
     today: Optional[date] = None,
 ) -> bytes:
-    today = today or date.today()
+    today = today or today_ist()
     if base_date > today:
         raise ValueError("Base date cannot be after today.")
+
+    current_trading_date = trading_date_for(today)
 
     src_wb = load_workbook(BytesIO(file_bytes), data_only=False)
     src_ws = src_wb.active
@@ -283,7 +285,7 @@ def process_workbook(
 
     base_label = f"Base Price ({base_date.strftime('%d-%b-%Y')})"
     ws.cell(1, OUT_BASE, base_label)
-    ws.cell(1, OUT_CURRENT, "Current Price")
+    ws.cell(1, OUT_CURRENT, f"Current Price ({current_trading_date.strftime('%d-%b-%Y')})")
     ws.cell(1, OUT_POINTS, "Points")
     ws.cell(1, OUT_PCT, "% Diff")
     ws.cell(1, OUT_RANK, "Rank")
